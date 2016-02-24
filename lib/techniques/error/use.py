@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -37,6 +37,7 @@ from lib.core.dicts import FROM_DUMMY_TABLE
 from lib.core.enums import DBMS
 from lib.core.enums import HASHDB_KEYS
 from lib.core.enums import HTTP_HEADER
+from lib.core.exception import SqlmapDataException
 from lib.core.settings import CHECK_ZERO_COLUMNS_THRESHOLD
 from lib.core.settings import MIN_ERROR_CHUNK_LENGTH
 from lib.core.settings import MAX_ERROR_CHUNK_LENGTH
@@ -73,12 +74,15 @@ def _oneShotErrorUse(expression, field=None, chunkTest=False):
             testChar = str(current % 10)
             testQuery = "SELECT %s('%s',%d)" % ("REPEAT" if Backend.isDbms(DBMS.MYSQL) else "REPLICATE", testChar, current)
             result = unArrayizeValue(_oneShotErrorUse(testQuery, chunkTest=True))
-            if result and testChar in result:
+
+            if (result or "").startswith(testChar):
                 if result == testChar * current:
                     kb.errorChunkLength = current
                     break
                 else:
-                    current = len(result) - len(kb.chars.stop)
+                    result = re.search(r"\A\w+", result).group(0)
+                    candidate = len(result) - len(kb.chars.stop)
+                    current = candidate if candidate != current else current - 1
             else:
                 current = current / 2
 
@@ -90,8 +94,8 @@ def _oneShotErrorUse(expression, field=None, chunkTest=False):
     if retVal is None or partialValue:
         try:
             while True:
-                check = "%s(?P<result>.*?)%s" % (kb.chars.start, kb.chars.stop)
-                trimcheck = "%s(?P<result>[^<]*)" % (kb.chars.start)
+                check = r"%s(?P<result>.*?)%s" % (kb.chars.start, kb.chars.stop)
+                trimcheck = r"%s(?P<result>[^<\n]*)" % (kb.chars.start)
 
                 if field:
                     nulledCastedField = agent.nullAndCastField(field)
@@ -149,7 +153,7 @@ def _oneShotErrorUse(expression, field=None, chunkTest=False):
                             logger.warn(warnMsg)
 
                         if not kb.testMode:
-                            check = "(?P<result>.*?)%s" % kb.chars.stop[:2]
+                            check = r"(?P<result>[^<>\n]*?)%s" % kb.chars.stop[:2]
                             output = extractRegexResult(check, trimmed, re.IGNORECASE)
 
                             if not output:
@@ -345,7 +349,14 @@ def errorUse(expression, dump=False):
             numThreads = min(conf.threads, (stopLimit - startLimit))
 
             threadData = getCurrentThreadData()
-            threadData.shared.limits = iter(xrange(startLimit, stopLimit))
+
+            try:
+                threadData.shared.limits = iter(xrange(startLimit, stopLimit))
+            except OverflowError:
+                errMsg = "boundary limits (%d,%d) are too large. Please rerun " % (startLimit, stopLimit)
+                errMsg += "with switch '--fresh-queries'"
+                raise SqlmapDataException(errMsg)
+
             threadData.shared.value = BigArray()
             threadData.shared.buffered = []
             threadData.shared.counter = 0

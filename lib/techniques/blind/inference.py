@@ -1,13 +1,15 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
+import re
 import threading
 import time
 
+from extra.safe2bin.safe2bin import safechardecode
 from extra.safe2bin.safe2bin import safecharencode
 from lib.core.agent import agent
 from lib.core.common import Backend
@@ -18,11 +20,13 @@ from lib.core.common import decodeIntToUnicode
 from lib.core.common import filterControlChars
 from lib.core.common import getCharset
 from lib.core.common import getCounter
+from lib.core.common import getUnicode
 from lib.core.common import goGoodSamaritan
 from lib.core.common import getPartRun
 from lib.core.common import hashDBRetrieve
 from lib.core.common import hashDBWrite
 from lib.core.common import incrementCounter
+from lib.core.common import randomInt
 from lib.core.common import safeStringFormat
 from lib.core.common import singleTimeWarnMessage
 from lib.core.data import conf
@@ -40,10 +44,13 @@ from lib.core.settings import INFERENCE_UNKNOWN_CHAR
 from lib.core.settings import INFERENCE_GREATER_CHAR
 from lib.core.settings import INFERENCE_EQUALS_CHAR
 from lib.core.settings import INFERENCE_NOT_EQUALS_CHAR
+from lib.core.settings import MIN_TIME_RESPONSES
 from lib.core.settings import MAX_BISECTION_LENGTH
 from lib.core.settings import MAX_TIME_REVALIDATION_STEPS
+from lib.core.settings import NULL
 from lib.core.settings import PARTIAL_HEX_VALUE_MARKER
 from lib.core.settings import PARTIAL_VALUE_MARKER
+from lib.core.settings import RANDOM_INTEGER_MARKER
 from lib.core.settings import VALID_TIME_CHARS_RUN_THRESHOLD
 from lib.core.threads import getCurrentThreadData
 from lib.core.threads import runThreads
@@ -256,14 +263,23 @@ def bisection(payload, expression, length=None, charsetType=None, firstChar=None
             while len(charTbl) != 1:
                 position = (len(charTbl) >> 1)
                 posValue = charTbl[position]
+                falsePayload = None
 
                 if "'%s'" % CHAR_INFERENCE_MARK not in payload:
                     forgedPayload = safeStringFormat(payload, (expressionUnescaped, idx, posValue))
+                    falsePayload = safeStringFormat(payload, (expressionUnescaped, idx, RANDOM_INTEGER_MARKER))
                 else:
                     # e.g.: ... > '%c' -> ... > ORD(..)
                     markingValue = "'%s'" % CHAR_INFERENCE_MARK
                     unescapedCharValue = unescaper.escape("'%s'" % decodeIntToUnicode(posValue))
                     forgedPayload = safeStringFormat(payload, (expressionUnescaped, idx)).replace(markingValue, unescapedCharValue)
+                    falsePayload = safeStringFormat(payload, (expressionUnescaped, idx)).replace(markingValue, NULL)
+
+                if timeBasedCompare:
+                    if kb.responseTimeMode:
+                        kb.responseTimePayload = falsePayload
+                    else:
+                        kb.responseTimePayload = None
 
                 result = Request.queryPage(forgedPayload, timeBasedCompare=timeBasedCompare, raise404=False)
                 incrementCounter(kb.technique)
@@ -589,6 +605,7 @@ def bisection(payload, expression, length=None, charsetType=None, firstChar=None
         raise KeyboardInterrupt
 
     _ = finalValue or partialValue
+
     return getCounter(kb.technique), safecharencode(_) if kb.safeCharEncode else _
 
 def queryOutputLength(expression, payload):

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -103,7 +103,7 @@ def forgeHeaders(items=None):
                         kb.mergeCookies = not _ or _[0] in ("y", "Y")
 
                     if kb.mergeCookies and kb.injection.place != PLACE.COOKIE:
-                        _ = lambda x: re.sub(r"(?i)\b%s=[^%s]+" % (re.escape(cookie.name), conf.cookieDel or DEFAULT_COOKIE_DELIMITER), "%s=%s" % (cookie.name, getUnicode(cookie.value)), x)
+                        _ = lambda x: re.sub(r"(?i)\b%s=[^%s]+" % (re.escape(cookie.name), conf.cookieDel or DEFAULT_COOKIE_DELIMITER), ("%s=%s" % (cookie.name, getUnicode(cookie.value))).replace('\\', r'\\'), x)
                         headers[HTTP_HEADER.COOKIE] = _(headers[HTTP_HEADER.COOKIE])
 
                         if PLACE.COOKIE in conf.parameters:
@@ -150,11 +150,13 @@ def checkCharEncoding(encoding, warn=True):
         return encoding
 
     # Reference: http://www.destructor.de/charsets/index.htm
-    translate = {"windows-874": "iso-8859-11", "en_us": "utf8", "macintosh": "iso-8859-1", "euc_tw": "big5_tw", "th": "tis-620", "unicode": "utf8",  "utc8": "utf8", "ebcdic": "ebcdic-cp-be", "iso-8859": "iso8859-1", "ansi": "ascii", "gbk2312": "gbk", "windows-31j": "cp932"}
+    translate = {"windows-874": "iso-8859-11", "utf-8859-1": "utf8", "en_us": "utf8", "macintosh": "iso-8859-1", "euc_tw": "big5_tw", "th": "tis-620", "unicode": "utf8",  "utc8": "utf8", "ebcdic": "ebcdic-cp-be", "iso-8859": "iso8859-1", "ansi": "ascii", "gbk2312": "gbk", "windows-31j": "cp932"}
 
     for delimiter in (';', ',', '('):
         if delimiter in encoding:
             encoding = encoding[:encoding.find(delimiter)].strip()
+
+    encoding = encoding.replace("&quot", "")
 
     # popular typos/errors
     if "8858" in encoding:
@@ -189,6 +191,8 @@ def checkCharEncoding(encoding, warn=True):
         encoding = "ascii"
     elif encoding.find("utf8") > 0:
         encoding = "utf8"
+    elif encoding.find("utf-8") > 0:
+        encoding = "utf-8"
 
     # Reference: http://philip.html5.org/data/charsets-2.html
     if encoding in translate:

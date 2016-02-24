@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -754,6 +754,9 @@ def cmdLineParser(argv=None):
         parser.add_option("--pickled-options", dest="pickledOptions",
                           help=SUPPRESS_HELP)
 
+        parser.add_option("--disable-precon", dest="disablePrecon", action="store_true",
+                          help=SUPPRESS_HELP)
+
         parser.add_option("--profile", dest="profile", action="store_true",
                           help=SUPPRESS_HELP)
 
@@ -780,9 +783,6 @@ def cmdLineParser(argv=None):
 
         parser.add_option("--run-case", dest="runCase", help=SUPPRESS_HELP)
 
-        parser.add_option("--nnc5ed", dest="nnc5ed", action="store_true",
-                          help=SUPPRESS_HELP)  # temporary hidden switch :)
-
         parser.add_option_group(target)
         parser.add_option_group(request)
         parser.add_option_group(optimization)
@@ -801,10 +801,10 @@ def cmdLineParser(argv=None):
 
         # Dirty hack to display longer options without breaking into two lines
         def _(self, *args):
-            _ = parser.formatter._format_option_strings(*args)
-            if len(_) > MAX_HELP_OPTION_LENGTH:
-                _ = ("%%.%ds.." % (MAX_HELP_OPTION_LENGTH - parser.formatter.indent_increment)) % _
-            return _
+            retVal = parser.formatter._format_option_strings(*args)
+            if len(retVal) > MAX_HELP_OPTION_LENGTH:
+                retVal = ("%%.%ds.." % (MAX_HELP_OPTION_LENGTH - parser.formatter.indent_increment)) % retVal
+            return retVal
 
         parser.formatter._format_option_strings = parser.formatter.format_option_strings
         parser.formatter.format_option_strings = type(parser.formatter.format_option_strings)(_, parser, type(parser))
@@ -861,7 +861,7 @@ def cmdLineParser(argv=None):
                 if not command:
                     continue
                 elif command.lower() == "clear":
-                    clearHistory()                    
+                    clearHistory()
                     print "[i] history cleared"
                     saveHistory(AUTOCOMPLETE_TYPE.SQLMAP)
                 elif command.lower() in ("x", "q", "exit", "quit"):

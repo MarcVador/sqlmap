@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -43,6 +43,7 @@ from lib.core.data import queries
 from lib.core.dicts import FROM_DUMMY_TABLE
 from lib.core.enums import DBMS
 from lib.core.enums import PAYLOAD
+from lib.core.exception import SqlmapDataException
 from lib.core.exception import SqlmapSyntaxException
 from lib.core.settings import MAX_BUFFERED_PARTIAL_UNION_LENGTH
 from lib.core.settings import SQL_SCALAR_REGEX
@@ -55,7 +56,7 @@ from lib.utils.progress import ProgressBar
 from thirdparty.odict.odict import OrderedDict
 
 def _oneShotUnionUse(expression, unpack=True, limited=False):
-    retVal = hashDBRetrieve("%s%s" % (conf.hexConvert, expression), checkConf=True)  # as union data is stored raw unconverted
+    retVal = hashDBRetrieve("%s%s" % (conf.hexConvert or False, expression), checkConf=True)  # as UNION data is stored raw unconverted
 
     threadData = getCurrentThreadData()
     threadData.resumed = retVal is not None
@@ -64,7 +65,7 @@ def _oneShotUnionUse(expression, unpack=True, limited=False):
         # Prepare expression with delimiters
         injExpression = unescaper.escape(agent.concatQuery(expression, unpack))
 
-        # Forge the union SQL injection request
+        # Forge the UNION SQL injection request
         vector = kb.injection.data[PAYLOAD.TECHNIQUE.UNION].vector
         kb.unionDuplicates = vector[7]
         kb.forcePartialUnion = vector[8]
@@ -77,7 +78,7 @@ def _oneShotUnionUse(expression, unpack=True, limited=False):
 
         incrementCounter(PAYLOAD.TECHNIQUE.UNION)
 
-        # Parse the returned page to get the exact union-based
+        # Parse the returned page to get the exact UNION-based
         # SQL injection output
         def _(regex):
             return reduce(lambda x, y: x if x is not None else y, (\
@@ -97,11 +98,11 @@ def _oneShotUnionUse(expression, unpack=True, limited=False):
         if retVal is not None:
             retVal = getUnicode(retVal, kb.pageEncoding)
 
-            # Special case when DBMS is Microsoft SQL Server and error message is used as a result of union injection
+            # Special case when DBMS is Microsoft SQL Server and error message is used as a result of UNION injection
             if Backend.isDbms(DBMS.MSSQL) and wasLastResponseDBMSError():
                 retVal = htmlunescape(retVal).replace("<br>", "\n")
 
-            hashDBWrite("%s%s" % (conf.hexConvert, expression), retVal)
+            hashDBWrite("%s%s" % (conf.hexConvert or False, expression), retVal)
         else:
             trimmed = _("%s(?P<result>.*?)<" % (kb.chars.start))
 
@@ -110,6 +111,9 @@ def _oneShotUnionUse(expression, unpack=True, limited=False):
                 warnMsg += "(probably due to its length and/or content): "
                 warnMsg += safecharencode(trimmed)
                 logger.warn(warnMsg)
+    else:
+        vector = kb.injection.data[PAYLOAD.TECHNIQUE.UNION].vector
+        kb.unionDuplicates = vector[7]
 
     return retVal
 
@@ -148,9 +152,9 @@ def configUnion(char=None, columns=None):
 
 def unionUse(expression, unpack=True, dump=False):
     """
-    This function tests for an union SQL injection on the target
+    This function tests for an UNION SQL injection on the target
     URL then call its subsidiary function to effectively perform an
-    union SQL injection on the affected URL
+    UNION SQL injection on the affected URL
     """
 
     initTechnique(PAYLOAD.TECHNIQUE.UNION)
@@ -231,7 +235,14 @@ def unionUse(expression, unpack=True, dump=False):
                 return value
 
             threadData = getCurrentThreadData()
-            threadData.shared.limits = iter(xrange(startLimit, stopLimit))
+
+            try:
+                threadData.shared.limits = iter(xrange(startLimit, stopLimit))
+            except OverflowError:
+                errMsg = "boundary limits (%d,%d) are too large. Please rerun " % (startLimit, stopLimit)
+                errMsg += "with switch '--fresh-queries'"
+                raise SqlmapDataException(errMsg)
+
             numThreads = min(conf.threads, (stopLimit - startLimit))
             threadData.shared.value = BigArray()
             threadData.shared.buffered = []

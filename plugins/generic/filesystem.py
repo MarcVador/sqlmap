@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -52,7 +52,12 @@ class Filesystem:
 
             lengthQuery = "SELECT DATALENGTH(%s) FROM %s" % (self.tblField, self.fileTblName)
 
-        localFileSize = os.path.getsize(localFile)
+        try:
+            localFileSize = os.path.getsize(localFile)
+        except OSError:
+            warnMsg = "file '%s' is missing" % localFile
+            logger.warn(warnMsg)
+            localFileSize = 0
 
         if fileRead and Backend.isDbms(DBMS.PGSQL):
             logger.info("length of read file '%s' cannot be checked on PostgreSQL" % remoteFile)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -86,6 +86,7 @@ from lib.core.exception import SqlmapSilentQuitException
 from lib.core.exception import SqlmapSyntaxException
 from lib.core.exception import SqlmapSystemException
 from lib.core.exception import SqlmapUserQuitException
+from lib.core.exception import SqlmapValueException
 from lib.core.log import LOGGER_HANDLER
 from lib.core.optiondict import optDict
 from lib.core.settings import BANNER
@@ -852,7 +853,7 @@ def dataToTrafficFile(data):
         conf.trafficFP.flush()
     except IOError, ex:
         errMsg = "something went wrong while trying "
-        errMsg += "to write to the traffic file '%s' ('%s')" % (conf.trafficFile, ex)
+        errMsg += "to write to the traffic file '%s' ('%s')" % (conf.trafficFile, getSafeExString(ex))
         raise SqlmapSystemException(errMsg)
 
 def dataToDumpFile(dumpFile, data):
@@ -915,8 +916,7 @@ def readInput(message, default=None, checkBatch=True):
                 retVal = "%s,%s" % (retVal, getUnicode(item, UNICODE_ENCODING))
 
     if retVal:
-        infoMsg = "%s%s" % (message, retVal)
-        logger.info(infoMsg)
+        dataToStdout("\r%s%s\n" % (message, retVal), forceOutput=True, bold=True)
 
         debugMsg = "used the given answer"
         logger.debug(debugMsg)
@@ -1275,7 +1275,7 @@ def parseTargetUrl():
     try:
         urlSplit = urlparse.urlsplit(conf.url)
     except ValueError, ex:
-        errMsg = "invalid URL '%s' has been given ('%s'). " % (conf.url, ex)
+        errMsg = "invalid URL '%s' has been given ('%s'). " % (conf.url, getSafeExString(ex))
         errMsg += "Please be sure that you don't have any leftover characters (e.g. '[' or ']') "
         errMsg += "in the hostname part"
         raise SqlmapGenericException(errMsg)
@@ -1638,7 +1638,9 @@ def safeStringFormat(format_, params):
                 match = re.search(r"(\A|[^A-Za-z0-9])(%s)([^A-Za-z0-9]|\Z)", retVal)
                 if match:
                     if count >= len(params):
-                        raise Exception("wrong number of parameters during string formatting")
+                        warnMsg = "wrong number of parameters during string formatting. "
+                        warnMsg += "Please report by e-mail content \"%r | %r | %r\" to 'dev@sqlmap.org'" % (format_, params, retVal)
+                        raise SqlmapValueException(warnMsg)
                     else:
                         retVal = re.sub(r"(\A|[^A-Za-z0-9])(%s)([^A-Za-z0-9]|\Z)", r"\g<1>%s\g<3>" % params[count], retVal, 1)
                         count += 1
@@ -1738,7 +1740,7 @@ def posixToNtSlashes(filepath):
     'C:\\\\Windows'
     """
 
-    return filepath.replace('/', '\\')
+    return filepath.replace('/', '\\') if filepath else filepath
 
 def ntToPosixSlashes(filepath):
     """
@@ -1749,7 +1751,7 @@ def ntToPosixSlashes(filepath):
     'C:/Windows'
     """
 
-    return filepath.replace('\\', '/')
+    return filepath.replace('\\', '/') if filepath else filepath
 
 def isHexEncodedString(subject):
     """
@@ -1821,7 +1823,7 @@ def parseXmlFile(xmlFile, handler):
             parse(stream, handler)
     except (SAXParseException, UnicodeError), ex:
         errMsg = "something seems to be wrong with "
-        errMsg += "the file '%s' ('%s'). Please make " % (xmlFile, ex)
+        errMsg += "the file '%s' ('%s'). Please make " % (xmlFile, getSafeExString(ex))
         errMsg += "sure that you haven't made any changes to it"
         raise SqlmapInstallationException, errMsg
 
@@ -1882,7 +1884,7 @@ def readCachedFileContent(filename, mode='rb'):
 	                    kb.cache.content[filename] = f.read()
                 except (IOError, OSError, MemoryError), ex:
                     errMsg = "something went wrong while trying "
-                    errMsg += "to read the content of file '%s' ('%s')" % (filename, ex)
+                    errMsg += "to read the content of file '%s' ('%s')" % (filename, getSafeExString(ex))
                     raise SqlmapSystemException(errMsg)
 
     return kb.cache.content[filename]
@@ -2001,7 +2003,7 @@ def getFileItems(filename, commentPrefix='#', unicode_=True, lowercase=False, un
                         retVal.append(line)
     except (IOError, OSError, MemoryError), ex:
         errMsg = "something went wrong while trying "
-        errMsg += "to read the content of file '%s' ('%s')" % (filename, ex)
+        errMsg += "to read the content of file '%s' ('%s')" % (filename, getSafeExString(ex))
         raise SqlmapSystemException(errMsg)
 
     return retVal if not unique else retVal.keys()
@@ -2219,16 +2221,16 @@ def wasLastResponseDelayed():
     # response times should be inside +-7*stdev([normal response times])
     # Math reference: http://www.answers.com/topic/standard-deviation
 
-    deviation = stdev(kb.responseTimes)
+    deviation = stdev(kb.responseTimes.get(kb.responseTimeMode, []))
     threadData = getCurrentThreadData()
 
     if deviation and not conf.direct:
-        if len(kb.responseTimes) < MIN_TIME_RESPONSES:
+        if len(kb.responseTimes[kb.responseTimeMode]) < MIN_TIME_RESPONSES:
             warnMsg = "time-based standard deviation method used on a model "
             warnMsg += "with less than %d response times" % MIN_TIME_RESPONSES
             logger.warn(warnMsg)
 
-        lowerStdLimit = average(kb.responseTimes) + TIME_STDEV_COEFF * deviation
+        lowerStdLimit = average(kb.responseTimes[kb.responseTimeMode]) + TIME_STDEV_COEFF * deviation
         retVal = (threadData.lastQueryDuration >= max(MIN_VALID_DELAYED_RESPONSE, lowerStdLimit))
 
         if not kb.testMode and retVal:
@@ -2700,7 +2702,7 @@ def parseSqliteTableSchema(value):
         table = {}
         columns = {}
 
-        for match in re.finditer(r"(\w+)[\"'`]?\s+(INT|INTEGER|TINYINT|SMALLINT|MEDIUMINT|BIGINT|UNSIGNED BIG INT|INT2|INT8|INTEGER|CHARACTER|VARCHAR|VARYING CHARACTER|NCHAR|NATIVE CHARACTER|NVARCHAR|TEXT|CLOB|TEXT|BLOB|NONE|REAL|DOUBLE|DOUBLE PRECISION|FLOAT|REAL|NUMERIC|DECIMAL|BOOLEAN|DATE|DATETIME|NUMERIC)\b", value, re.I):
+        for match in re.finditer(r"(\w+)[\"'`]?\s+(INT|INTEGER|TINYINT|SMALLINT|MEDIUMINT|BIGINT|UNSIGNED BIG INT|INT2|INT8|INTEGER|CHARACTER|VARCHAR|VARYING CHARACTER|NCHAR|NATIVE CHARACTER|NVARCHAR|TEXT|CLOB|LONGTEXT|BLOB|NONE|REAL|DOUBLE|DOUBLE PRECISION|FLOAT|REAL|NUMERIC|DECIMAL|BOOLEAN|DATE|DATETIME|NUMERIC)\b", value, re.I):
             columns[match.group(1)] = match.group(2)
 
         table[conf.tbl] = columns
@@ -2946,7 +2948,14 @@ def decodeIntToUnicode(value):
                 _ = "%x" % value
                 if len(_) % 2 == 1:
                     _ = "0%s" % _
-                retVal = getUnicode(hexdecode(_), encoding="UTF-16" if Backend.isDbms(DBMS.MSSQL) else None)
+                raw = hexdecode(_)
+
+                if Backend.isDbms(DBMS.MSSQL):
+                    retVal = getUnicode(raw, "UTF-16-BE")
+                elif Backend.getIdentifiedDbms() in (DBMS.PGSQL, DBMS.ORACLE):
+                    retVal = unichr(value)
+                else:
+                    retVal = getUnicode(raw, conf.charset)
             else:
                 retVal = getUnicode(chr(value))
         except:
@@ -3763,8 +3772,12 @@ def decodeHexValue(value, raw=False):
 
     def _(value):
         retVal = value
-        if value and isinstance(value, basestring) and len(value) % 2 == 0:
-            retVal = hexdecode(retVal)
+        if value and isinstance(value, basestring):
+            if len(value) % 2 != 0:
+                retVal = "%s?" % hexdecode(value[:-1])
+                singleTimeWarnMessage("there was a problem decoding value '%s' from expected hexadecimal form" % value)
+            else:
+                retVal = hexdecode(value)
 
             if not kb.binaryField and not raw:
                 if Backend.isDbms(DBMS.MSSQL) and value.startswith("0x"):
@@ -3838,7 +3851,7 @@ def hashDBRetrieve(key, unserialize=False, checkConf=False):
 
     _ = "%s%s%s" % (conf.url or "%s%s" % (conf.hostname, conf.port), key, HASHDB_MILESTONE_VALUE)
     retVal = conf.hashDB.retrieve(_, unserialize) if kb.resumeValues and not (checkConf and any((conf.flushSession, conf.freshQueries))) else None
-    if not kb.inferenceMode and not kb.fileReadMode and any(_ in (retVal or "") for _ in (PARTIAL_VALUE_MARKER, PARTIAL_HEX_VALUE_MARKER)):
+    if not kb.inferenceMode and not kb.fileReadMode and isinstance(retVal, basestring) and any(_ in retVal for _ in (PARTIAL_VALUE_MARKER, PARTIAL_HEX_VALUE_MARKER)):
         retVal = None
     return retVal
 

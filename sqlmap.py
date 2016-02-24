@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -12,9 +12,12 @@ import os
 import re
 import shutil
 import sys
+import thread
 import time
 import traceback
 import warnings
+
+sys.dont_write_bytecode = True
 
 warnings.filterwarnings(action="ignore", message=".*was already imported", category=UserWarning)
 warnings.filterwarnings(action="ignore", category=DeprecationWarning)
@@ -107,11 +110,22 @@ def main():
         elif conf.liveTest:
             liveTest()
         else:
-            start()
+            try:
+                start()
+            except thread.error as ex:
+                if "can't start new thread" in getSafeExString(ex):
+                    errMsg = "unable to start new threads. Please check OS (u)limits"
+                    logger.critical(errMsg)
+                    raise SystemExit
+                else:
+                    raise
 
     except SqlmapUserQuitException:
         errMsg = "user quit"
-        logger.error(errMsg)
+        try:
+            logger.error(errMsg)
+        except KeyboardInterrupt:
+            pass
 
     except (SqlmapSilentQuitException, bdb.BdbQuit):
         pass
@@ -121,18 +135,29 @@ def main():
 
     except SqlmapBaseException as ex:
         errMsg = getSafeExString(ex)
-        logger.critical(errMsg)
+        try:
+            logger.critical(errMsg)
+        except KeyboardInterrupt:
+            pass
         raise SystemExit
 
     except KeyboardInterrupt:
         print
+
         errMsg = "user aborted"
-        logger.error(errMsg)
+        try:
+            logger.error(errMsg)
+        except KeyboardInterrupt:
+            pass
 
     except EOFError:
         print
         errMsg = "exit"
-        logger.error(errMsg)
+
+        try:
+            logger.error(errMsg)
+        except KeyboardInterrupt:
+            pass
 
     except SystemExit:
         pass
@@ -142,35 +167,54 @@ def main():
         errMsg = unhandledExceptionMessage()
         excMsg = traceback.format_exc()
 
-        if "No space left" in excMsg:
-            errMsg = "no space left on output device"
-            logger.error(errMsg)
-            raise SystemExit
+        try:
+            if any(_ in excMsg for _ in ("No space left", "Disk quota exceeded")):
+                errMsg = "no space left on output device"
+                logger.error(errMsg)
+                raise SystemExit
 
-        for match in re.finditer(r'File "(.+?)", line', excMsg):
-            file_ = match.group(1)
-            file_ = os.path.relpath(file_, os.path.dirname(__file__))
-            file_ = file_.replace("\\", '/')
-            file_ = re.sub(r"\.\./", '/', file_).lstrip('/')
-            excMsg = excMsg.replace(match.group(1), file_)
+            elif all(_ in excMsg for _ in ("pymysql", "configparser")):
+                errMsg = "wrong initialization of pymsql detected (using Python3 dependencies)"
+                logger.error(errMsg)
+                raise SystemExit
 
-        errMsg = maskSensitiveData(errMsg)
-        excMsg = maskSensitiveData(excMsg)
+            elif "bad marshal data (unknown type code)" in excMsg:
+                match = re.search(r"\s*(.+)\s+ValueError", excMsg)
+                errMsg = "one of your .pyc files are corrupted%s" % (" ('%s')" % match.group(1) if match else "")
+                errMsg += ". Please delete .pyc files on your system to fix the problem"
+                logger.error(errMsg)
+                raise SystemExit
 
-        logger.critical(errMsg)
-        kb.stickyLevel = logging.CRITICAL
-        dataToStdout(excMsg)
-        createGithubIssue(errMsg, excMsg)
+            for match in re.finditer(r'File "(.+?)", line', excMsg):
+                file_ = match.group(1)
+                file_ = os.path.relpath(file_, os.path.dirname(__file__))
+                file_ = file_.replace("\\", '/')
+                file_ = re.sub(r"\.\./", '/', file_).lstrip('/')
+                excMsg = excMsg.replace(match.group(1), file_)
+
+            errMsg = maskSensitiveData(errMsg)
+            excMsg = maskSensitiveData(excMsg)
+
+            if hasattr(conf, "api"):
+                logger.critical("%s\n%s" % (errMsg, excMsg))
+            else:
+                logger.critical(errMsg)
+                kb.stickyLevel = logging.CRITICAL
+                dataToStdout(excMsg)
+                createGithubIssue(errMsg, excMsg)
+
+        except KeyboardInterrupt:
+            pass
 
     finally:
+        kb.threadContinue = False
+        kb.threadException = True
+
         if conf.get("showTime"):
             dataToStdout("\n[*] shutting down at %s\n\n" % time.strftime("%X"), forceOutput=True)
 
         if kb.get("tempDir"):
             shutil.rmtree(kb.tempDir, ignore_errors=True)
-
-        kb.threadContinue = False
-        kb.threadException = True
 
         if conf.get("hashDB"):
             try:

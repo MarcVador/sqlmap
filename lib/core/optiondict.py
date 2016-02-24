@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-Copyright (c) 2006-2015 sqlmap developers (http://sqlmap.org/)
+Copyright (c) 2006-2016 sqlmap developers (http://sqlmap.org/)
 See the file 'doc/COPYING' for copying permission
 """
 
@@ -227,6 +227,7 @@ optDict = {
                              },
             "Hidden": {
                                "dummy":             "boolean",
+                               "disablePrecon":     "boolean",
                                "binaryFields":      "string",
                                "profile":           "boolean",
                                "cpuThrottle":       "integer",
